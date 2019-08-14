@@ -1,12 +1,12 @@
 #from __future__ import print_function
 import argparse
 import cv2
+import extractor
 import face_recognition
 import imutils
 import numpy as np
 import pickle
 import sys
-import extractor
 
 from imutils.object_detection import non_max_suppression
 from imutils import paths
@@ -77,7 +77,7 @@ def getValidPairs(output, detected_keypoints):
 											np.linspace(candA[i][1], candB[j][1], num=n_interp_samples)))
 					# Find L(p(u))
 					paf_interp = []
-					for k in range(len(interp_coord)):
+					for k in range(len(interp_coord) - 1):
 						paf_interp.append([pafA[int(round(interp_coord[k][1])), int(round(interp_coord[k][0]))],
 											pafB[int(round(interp_coord[k][1])), int(round(interp_coord[k][0]))] ])
 					# Find E
@@ -151,6 +151,7 @@ def get_args():
 		help="face detection model to use: either `hog` or `cnn`")
 	ap.add_argument("-t", "--type", type=str, default="video",
 		help="input type: either video or frames")
+	ap.add_argument("-idx", "--index", type=int, required=True)
 	args = vars(ap.parse_args())
 	return args
 
@@ -192,6 +193,9 @@ def recognize_faces(frame, width, height):
 		detections_bbox.append(tuple((startY, endX, endY, startX)))
 
 	encodings = face_recognition.face_encodings(image, detections_bbox)
+
+	with open("aaron_logger", "a") as file:
+		file.write("frame {}: {} \n".format(frame_number, encodings))
 
 	# loop over the facial embeddings
 	for encoding in encodings:
@@ -295,10 +299,11 @@ def detect_bodies(frame, pose_pairs, map_Idx):
 				#cv2.rectangle(frameClone, (B[0], A[0]), (B[1], A[1]), (0, 255, 0), 2)
 				(X2, Y2) = (B[1], A[1])
 				openpose_faces.append((X2, Y2))
-	return body_boxes, openpose_faces	
+	return body_boxes, openpose_faces
 
 if __name__ == '__main__':
   
+  	
 	tracker_Type = "KCF"
 
 	args = get_args()
@@ -327,7 +332,6 @@ if __name__ == '__main__':
 		stream = cv2.VideoCapture(args["input"])
 		length = int(stream.get(cv2.CAP_PROP_FRAME_COUNT))
 		(grabbed, frame) = stream.read()
-		#fps = stream.get(cv2.CAP_PROP_FPS)
 		if not grabbed:
 			print('Failed to read video')
 			sys.exit(1)
@@ -338,15 +342,17 @@ if __name__ == '__main__':
 	writer = None
 	frame_number=0
 
-	frameWidth = int(frame.shape[1])
-	frameHeight = int(frame.shape[0])
-	print(frameWidth, frameHeight)
-	fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-	output_video = cv2.VideoWriter(args["output"], fourcc, 25.07, (frameWidth, frameHeight))
+	frameWidth = frame.shape[1]
+	frameHeight = frame.shape[0]
+
 	#width = int(stream.get(3))  # float
 	#height = int(stream.get(4)) # float
 
-	
+	known_name = args["output"]
+	known_name = known_name[:-4]
+	index = args["index"]
+	true_coords = extractor.get_coords(extractor.text_list[index][0])
+
 	multiTracker = cv2.MultiTracker_create()
 	multiTracker_body = cv2.MultiTracker_create()
 	face_boxes, names = recognize_faces(frame, frameWidth, frameHeight)
@@ -416,7 +422,7 @@ if __name__ == '__main__':
 
 					if name == "Unknown":
 						try:							
-							cv2.rectangle(frame, (body_left, body_top), (body_right, body_bottom), (0, 255, 0), 2)
+							cv2.rectangle(frame, (body_left, body_top), (body_right, body_bottom), (255, 0, 0), 2)
 							sub_face = frame[body_top:body_bottom, body_left:body_right]
 							sub_face = cv2.GaussianBlur(sub_face,(23, 23), 70)
 							frame[body_top:body_top + sub_face.shape[0], body_left:body_left + sub_face.shape[1]] = sub_face
@@ -425,18 +431,15 @@ if __name__ == '__main__':
 							print("shape not found")
 
 					else:
-						try:
-							cv2.rectangle(frame, (body_left, body_top), (body_right, body_bottom), (0, 255, 0), 2)
-							y = body_top - 15 if body_top - 15 > 15 else body_top + 15
-							cv2.putText(frame, name, (body_left, y), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
-						except AttributeError:
-							print("shape not found")
+						cv2.rectangle(frame, (body_left, body_top), (body_right, body_bottom), (255, 0, 0), 2)
+						y = body_top - 15 if body_top - 15 > 15 else body_top + 15
+						cv2.putText(frame, name, (body_left, y), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 0, 0), 2)
 
 			# draw the predicted face name on the image
 			if name == "Unknown":
 				try:
 					print(left, top, right, bottom)
-					cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+					cv2.rectangle(frame, (left, top), (right, bottom), (255, 0, 0), 2)
 					sub_face = frame[top:bottom, left:right]
 					if len(sub_face) == 0:
 						print("len sub_face == 0")
@@ -450,34 +453,32 @@ if __name__ == '__main__':
 				
 			else:
 				print((left, top, right, bottom))
-				try:
-					cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-					print("recognized face")
-					y = top - 15 if top - 15 > 15 else top + 15
-					cv2.putText(frame, name, (left, y), cv2.FONT_HERSHEY_SIMPLEX,
-						0.75, (0, 255, 0), 2)
-					with open("aaron_logger", "a") as file:
-						file.write("frame {}: {} \n".format(frame_number, (left, top, right, bottom)))
-				except AttributeError:
-					print("shape not found")
-		
+				cv2.rectangle(frame, (left, top), (right, bottom), (255, 0, 0), 2)
+				print("recognized face")
+				y = top - 15 if top - 15 > 15 else top + 15
+				cv2.putText(frame, name, (left, y), cv2.FONT_HERSHEY_SIMPLEX,
+					0.75, (255, 0, 0), 2)
+				cv2.rectangle(frame, (int(true_coords[frame_number][0]), int(true_coords[frame_number][1])), (int(true_coords[frame_number][2]), int(true_coords[frame_number][3])), (0, 255, 0), 2)
+				res = extractor.compare((left, top, right, bottom), true_coords[frame_number])
+				with open("{}".format(known_name), "a") as file:
+					file.write("frame {}: {} performance: {} % \n".format(frame_number, (left, top, right, bottom), res))
+
 		# if the writer is not None, write the frame with recognized
 		# faces t odisk
-		# if writer is not None:
-		# 	print("Writing frame {} / {}".format(frame_number, length))
-		# 	writer.write(frame)
+		if writer is not None:
+			print("Writing frame {} / {}".format(frame_number, length))
+			writer.write(frame)
 
-		# # if the video writer is None *AND* we are supposed to write
-		# # the output video to disk initialize the writer
-		# if writer is None and args["output"] is not None:
-		# 	print("Writing frame {} / {}".format(frame_number, length))
-		# 	fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
-		# 	writer = cv2.VideoWriter(args["output"], fourcc, 24,
-		# 	(frameWidth, frameHeight), True)
+		# if the video writer is None *AND* we are supposed to write
+		# the output video to disk initialize the writer
+		if writer is None and args["output"] is not None:
+			print("Writing frame {} / {}".format(frame_number, length))
+			fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+			writer = cv2.VideoWriter(args["output"], fourcc, 24,
+			(frame.shape[1], frame.shape[0]), True)
 
-	if input_type == "video":
-		# close the video file pointers
-		stream.release()
+	# close the video file pointers
+	stream.release()
 
 	# check to see if the video writer point needs to be released
 	if writer is not None:
