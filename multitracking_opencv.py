@@ -202,7 +202,7 @@ def recognize_faces(frame, width, height):
 		# attempt to match each face in the input image to our known
 		# encodings
 		matches = face_recognition.compare_faces(data["encodings"],
-			encoding, tolerance = 0.4)
+			encoding, tolerance = 0.6)
 		name = "Unknown"
 
 		# check to see if we have found a match
@@ -379,8 +379,9 @@ if __name__ == '__main__':
 		else:
 			if frame_number == length:
 				break
+			print(imagePaths[frame_number])
 			frame = cv2.imread(imagePaths[frame_number])
-
+		compare_res = []
 		if frame_number % 5 == 0:
 			multiTracker = cv2.MultiTracker_create()
 			multiTracker_body = cv2.MultiTracker_create()
@@ -460,9 +461,14 @@ if __name__ == '__main__':
 					0.75, (255, 0, 0), 2)
 				cv2.rectangle(frame, (int(true_coords[frame_number][0]), int(true_coords[frame_number][1])), (int(true_coords[frame_number][2]), int(true_coords[frame_number][3])), (0, 255, 0), 2)
 				res = extractor.compare((left, top, right, bottom), true_coords[frame_number])
-				with open("{}".format(known_name), "a") as file:
+				compare_res.append(res)
+				with open("{}.txt".format(known_name), "a") as file:
 					file.write("frame {}: {} performance: {} % \n".format(frame_number, (left, top, right, bottom), res))
+		cv2.imshow("output", frame)
+		key = cv2.waitKey(1) & 0xFF
 
+		if key == ord("q"):
+			break
 		# if the writer is not None, write the frame with recognized
 		# faces t odisk
 		if writer is not None:
@@ -477,8 +483,13 @@ if __name__ == '__main__':
 			writer = cv2.VideoWriter(args["output"], fourcc, 24,
 			(frame.shape[1], frame.shape[0]), True)
 
-	# close the video file pointers
-	stream.release()
+	avg_res = sum(compare_res) / len(compare_res)
+	with open("{}.txt".format(known_name), "a") as file:
+		file.write("Average result: {}".format(avg_res))
+
+	if input_type == "video":
+		# close the video file pointers
+		stream.release()
 
 	# check to see if the video writer point needs to be released
 	if writer is not None:
