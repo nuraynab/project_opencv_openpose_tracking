@@ -337,9 +337,13 @@ if __name__ == '__main__':
 			sys.exit(1)
 	else:
 		imagePaths = list(paths.list_images(args["input"]))
+		imagePaths.sort()
 		frame = cv2.imread(imagePaths[0])
 		length = len(imagePaths)
-	writer = None
+
+	fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+	writer = cv2.VideoWriter(args["output"], fourcc, 24,
+	(frame.shape[1], frame.shape[0]), True)
 	frame_number=0
 
 	frameWidth = frame.shape[1]
@@ -348,10 +352,12 @@ if __name__ == '__main__':
 	#width = int(stream.get(3))  # float
 	#height = int(stream.get(4)) # float
 
-	known_name = args["output"]
-	known_name = known_name[:-4]
+	known_name = args["encodings"]
+	known_name = known_name[:-7]
 	index = args["index"]
 	true_coords = extractor.get_coords(extractor.text_list[index][0])
+	print(extractor.text_list[index][0])
+	print(true_coords)
 
 	multiTracker = cv2.MultiTracker_create()
 	multiTracker_body = cv2.MultiTracker_create()
@@ -379,6 +385,7 @@ if __name__ == '__main__':
 		else:
 			if frame_number == length:
 				break
+
 			print(imagePaths[frame_number])
 			frame = cv2.imread(imagePaths[frame_number])
 		compare_res = []
@@ -459,31 +466,40 @@ if __name__ == '__main__':
 				y = top - 15 if top - 15 > 15 else top + 15
 				cv2.putText(frame, name, (left, y), cv2.FONT_HERSHEY_SIMPLEX,
 					0.75, (255, 0, 0), 2)
-				cv2.rectangle(frame, (int(true_coords[frame_number][0]), int(true_coords[frame_number][1])), (int(true_coords[frame_number][2]), int(true_coords[frame_number][3])), (0, 255, 0), 2)
-				res = extractor.compare((left, top, right, bottom), true_coords[frame_number])
-				compare_res.append(res)
-				with open("{}.txt".format(known_name), "a") as file:
-					file.write("frame {}: {} performance: {} % \n".format(frame_number, (left, top, right, bottom), res))
+
+			cv2.rectangle(frame, (int(true_coords[frame_number][0]), int(true_coords[frame_number][1])), (int(true_coords[frame_number][2]), int(true_coords[frame_number][3])), (0, 255, 0), 2)
+			print(true_coords[frame_number])
+			res = extractor.compare((left, top, right, bottom), true_coords[frame_number])
+			compare_res.append(res)
+			with open("text_output/{}.txt".format(known_name), "a") as file:
+				file.write("frame {}: {} true_coords: {} performance: {} % \n".format(frame_number, (left, top, right, bottom), true_coords[frame_number], res))
+		
 		cv2.imshow("output", frame)
 		key = cv2.waitKey(1) & 0xFF
 
 		if key == ord("q"):
 			break
-		# if the writer is not None, write the frame with recognized
-		# faces t odisk
-		if writer is not None:
-			print("Writing frame {} / {}".format(frame_number, length))
-			writer.write(frame)
 
-		# if the video writer is None *AND* we are supposed to write
-		# the output video to disk initialize the writer
-		if writer is None and args["output"] is not None:
-			print("Writing frame {} / {}".format(frame_number, length))
-			fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-			writer = cv2.VideoWriter(args["output"], fourcc, 24,
-			(frame.shape[1], frame.shape[0]), True)
+		print("Writing frame {} / {}".format(frame_number, length))
+		writer.write(frame)
 
-	avg_res = sum(compare_res) / len(compare_res)
+		# # if the writer is not None, write the frame with recognized
+		# # faces t odisk
+		# if writer is not None:
+		# 	print("Writing frame {} / {}".format(frame_number, length))
+		# 	writer.write(frame)
+
+		# # if the video writer is None *AND* we are supposed to write
+		# # the output video to disk initialize the writer
+		# if writer is None and args["output"] is not None:
+		# 	print("Writing frame {} / {}".format(frame_number, length))
+		# 	fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+		# 	writer = cv2.VideoWriter(args["output"], fourcc, 24,
+		# 	(frame.shape[1], frame.shape[0]), True)
+
+	if compare_res != []:
+		avg_res = sum(compare_res) / len(compare_res)
+
 	with open("{}.txt".format(known_name), "a") as file:
 		file.write("Average result: {}".format(avg_res))
 
