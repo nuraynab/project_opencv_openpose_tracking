@@ -152,10 +152,11 @@ def get_args():
 	ap.add_argument("-t", "--type", type=str, default="video",
 		help="input type: either video or frames")
 	ap.add_argument("-idx", "--index", type=int, required=True)
+	ap.add_argument("-v", "--video_i", type=int, required=True)
 	args = vars(ap.parse_args())
 	return args
 
-def recognize_faces(frame, width, height):
+def recognize_faces(frame, width, height, true_w, true_h):
 
 	caffemodel = {"prototxt":"./deploy.prototxt",
 			  "model":"./res10_300x300_ssd_iter_140000.caffemodel",
@@ -199,8 +200,8 @@ def recognize_faces(frame, width, height):
 
 	# loop over the facial embeddings
 	for encoding in encodings:
-		# attempt to match each face in the input image to our known
-		# encodings
+		# attempt to match each face in the input image to our known encodings
+
 		matches = face_recognition.compare_faces(data["encodings"],
 			encoding, tolerance = 0.6)
 		name = "Unknown"
@@ -226,7 +227,21 @@ def recognize_faces(frame, width, height):
 		
 		# update the list of names
 		names.append(name)
-	return detections_bbox2, names
+	faces_coords = []
+	for name, [startX, startY, endX, endY] in zip(names, detections_bbox2):
+		if name != "Unknown":	
+			x = startX + (endX - startX) / 2
+			y = startY + (endY - startY) / 2
+			startX = x - true_w / 2
+			startY = y - true_h / 2
+			endX = x + true_w / 2
+			endY = y + true_h / 2
+			faces_coords.append([int(startX), int(startY), int(endX), int(endY)])
+		else:
+			faces_coords.append([startX, startY, endX, endY])
+	
+	return faces_coords, names
+
 
 def detect_bodies(frame, pose_pairs, map_Idx):
 
@@ -344,7 +359,14 @@ if __name__ == '__main__':
 	fourcc = cv2.VideoWriter_fourcc(*"MJPG")
 	writer = cv2.VideoWriter(args["output"], fourcc, 24,
 	(frame.shape[1], frame.shape[0]), True)
-	frame_number=0
+
+	# frame_number = 0
+	# temp_index = 0
+
+	frame_number = 0
+	# temp_index = 0
+	iterator = 0
+
 
 	frameWidth = frame.shape[1]
 	frameHeight = frame.shape[0]
@@ -352,16 +374,28 @@ if __name__ == '__main__':
 	#width = int(stream.get(3))  # float
 	#height = int(stream.get(4)) # float
 
-	known_name = args["encodings"]
-	known_name = known_name[:-7]
+	
 	index = args["index"]
-	true_coords = extractor.get_coords(extractor.text_list[index][0])
+	known_name = extractor.names[index]
+
+	video_i = args["video_i"]
+
+	if video_i != 0:
+		with open("{}".format(extractor.text_list[index][0]), "r") as f:
+			lines = f.readlines()
+		with open("{}".format(extractor.text_list[index][0]), "w") as f:
+			for i, line in enumerate(lines):
+					if i >= sum(extractor.video_per_name[index][:video_i]):
+						f.write(line)
+
+	true_w, true_h, true_coords = extractor.get_coords(extractor.text_list[index][0])
+	# videos_per_person = extractor.video_per_name[index]
 	print(extractor.text_list[index][0])
-	print(true_coords)
+	print(len(true_coords))
 
 	multiTracker = cv2.MultiTracker_create()
 	multiTracker_body = cv2.MultiTracker_create()
-	face_boxes, names = recognize_faces(frame, frameWidth, frameHeight)
+	face_boxes, names = recognize_faces(frame, frameWidth, frameHeight, true_w[frame_number], true_h[frame_number])
 	body_boxes, openpose_faces = detect_bodies(frame, pose_pairs, map_Idx)
 
 	# Initialize MultiTracker 
@@ -372,8 +406,13 @@ if __name__ == '__main__':
 	for body_box in body_boxes:
 		multiTracker_body.add(cv2.TrackerKCF_create(), frame, body_box)
 
+	compare_res = []
+
 	while True:
-		frame_number += 1
+		
+
+		print("Writing frame {} / {}".format(frame_number + 1, length))
+
 		if input_type == "video":
 			# grab the next frame
 			(grabbed, frame) = stream.read()
@@ -388,13 +427,13 @@ if __name__ == '__main__':
 
 			print(imagePaths[frame_number])
 			frame = cv2.imread(imagePaths[frame_number])
-		compare_res = []
+
 		if frame_number % 5 == 0:
 			multiTracker = cv2.MultiTracker_create()
 			multiTracker_body = cv2.MultiTracker_create()
-			face_boxes, names = recognize_faces(frame, frameWidth, frameHeight)
+			face_boxes, names = recognize_faces(frame, frameWidth, frameHeight, true_w[frame_number], true_h[frame_number])
 			body_boxes, openpose_faces = detect_bodies(frame, pose_pairs, body_boxes)
-
+			print(face_boxes)
 			# Initialize MultiTracker 
 			for bbox in face_boxes:
 				multiTracker.add(cv2.TrackerKCF_create(), frame, tuple(bbox))
@@ -458,30 +497,48 @@ if __name__ == '__main__':
 						frame[top:top + sub_face.shape[0], left:left + sub_face.shape[1]] = sub_face
 				except AttributeError:
 					print("shape not found")
+				if len(names) == 1:
+					res = extractor.compare((left, top, right, bottom), true_coords[frame_number])
+					compare_res.append(res)
+					with open("text_output/{}.txt".format(known_name), "a") as file:
+						file.write("frame {}: {} true_coords: {} performance: {} % \n".format(frame_number, (left, top, right, bottom), true_coords[iterator], res))
 				
 			else:
 				print((left, top, right, bottom))
 				cv2.rectangle(frame, (left, top), (right, bottom), (255, 0, 0), 2)
 				print("recognized face")
 				y = top - 15 if top - 15 > 15 else top + 15
-				cv2.putText(frame, name, (left, y), cv2.FONT_HERSHEY_SIMPLEX,
-					0.75, (255, 0, 0), 2)
+				cv2.putText(frame, name, (left, y), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 0, 0), 2)
+
+				print(true_coords[frame_number])
+				res = extractor.compare((left, top, right, bottom), true_coords[frame_number])
+				compare_res.append(res)
+				with open("text_output/{}.txt".format(known_name), "a") as file:
+					file.write("frame {}: {} true_coords: {} performance: {} % \n".format(frame_number, (left, top, right, bottom), true_coords[iterator], res))
 
 			cv2.rectangle(frame, (int(true_coords[frame_number][0]), int(true_coords[frame_number][1])), (int(true_coords[frame_number][2]), int(true_coords[frame_number][3])), (0, 255, 0), 2)
-			print(true_coords[frame_number])
-			res = extractor.compare((left, top, right, bottom), true_coords[frame_number])
-			compare_res.append(res)
-			with open("text_output/{}.txt".format(known_name), "a") as file:
-				file.write("frame {}: {} true_coords: {} performance: {} % \n".format(frame_number, (left, top, right, bottom), true_coords[frame_number], res))
-		
+			
+
+			# cv2.rectangle(frame, (int(true_coords[frame_number][0]), int(true_coords[frame_number][1])), (int(true_coords[frame_number][2]), int(true_coords[frame_number][3])), (0, 255, 0), 2)
+			# print(true_coords[frame_number])
+			# res = extractor.compare((left, top, right, bottom), true_coords[frame_number])
+			# compare_res.append(res)
+
+
+		frame_number += 1
+
 		cv2.imshow("output", frame)
 		key = cv2.waitKey(1) & 0xFF
 
 		if key == ord("q"):
 			break
 
-		print("Writing frame {} / {}".format(frame_number, length))
+		# print("Writing frame {} / {}".format(frame_number, length))
 		writer.write(frame)
+
+		# frame_number += 1
+		# temp_index += 1
+		# iterator += 1
 
 		# # if the writer is not None, write the frame with recognized
 		# # faces t odisk
@@ -496,12 +553,16 @@ if __name__ == '__main__':
 		# 	fourcc = cv2.VideoWriter_fourcc(*"MJPG")
 		# 	writer = cv2.VideoWriter(args["output"], fourcc, 24,
 		# 	(frame.shape[1], frame.shape[0]), True)
-
 	if compare_res != []:
 		avg_res = sum(compare_res) / len(compare_res)
+		avg_res = round(avg_res, 3)
 
-	with open("{}.txt".format(known_name), "a") as file:
-		file.write("Average result: {}".format(avg_res))
+		with open("text_output/{}_avg.txt".format(known_name), "a") as file:
+			file.write("{} video \n".format(args["output"]))
+			file.write("Average result: {} \n".format(avg_res))
+	else:
+		with open("text_output/{}_avg.txt".format(known_name), "a") as file:
+			file.write("No result \n")
 
 	if input_type == "video":
 		# close the video file pointers
